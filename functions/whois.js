@@ -1,86 +1,63 @@
-// Cloudflare Pages Function - WHOIS Lookup (pure RDAP, no API limit)
+// Cloudflare Pages Function - RDAP WHOIS lookup
 
 export async function onRequest(context) {
   const { request } = context;
   const url = new URL(request.url);
-  const domain = url.searchParams.get('domain');
+  const domain = url.searchParams.get("domain");
 
-  const corsHeaders = {
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Methods': 'GET, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type',
-    'Content-Type': 'application/json'
+  const cors = {
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Methods": "GET, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type",
+    "Content-Type": "application/json"
   };
 
-  if (request.method === 'OPTIONS') {
-    return new Response(null, { headers: corsHeaders });
-  }
+  if (request.method === "OPTIONS")
+    return new Response(null, { headers: cors });
 
-  if (!domain) {
-    return new Response(
-      JSON.stringify({ error: 'Thiếu domain', message: 'Hãy dùng ?domain=example.com' }),
-      { status: 400, headers: corsHeaders }
-    );
-  }
+  if (!domain)
+    return new Response(JSON.stringify({ error: "Thiếu domain" }), { status: 400, headers: cors });
 
-  const cleanDomain = domain
-    .replace(/^https?:\/\//, '')
-    .replace(/\/$/, '')
-    .split('/')[0];
+  const clean = domain.replace(/^https?:\/\//, "").replace(/\/$/, "").split("/")[0];
+  const tld = clean.split(".").pop().toLowerCase();
 
-  const domainRegex = /^[a-zA-Z0-9][a-zA-Z0-9-]{0,61}[a-zA-Z0-9]?(\.[a-zA-Z]{2,})+$/;
-  if (!domainRegex.test(cleanDomain)) {
-    return new Response(
-      JSON.stringify({ error: 'Domain không hợp lệ', domain: cleanDomain }),
-      { status: 400, headers: corsHeaders }
-    );
-  }
+  // RDAP servers theo từng TLD
+  const rdapServers = {
+    com: "https://rdap.verisign.com/com/v1/domain/",
+    net: "https://rdap.verisign.com/net/v1/domain/",
+    org: "https://rdap.publicinterestregistry.net/rdap/org/domain/",
+    dev: "https://rdap.googleapis.com/domain/",
+    vn: "https://rdap.vnnic.vn/rdap/domain/",
+  };
+  const rdapUrl = (rdapServers[tld] || "https://rdap.org/domain/") + clean;
 
   try {
-    const rdapUrl = `https://rdap.org/domain/${cleanDomain}`;
-    const rdapResp = await fetch(rdapUrl, { signal: AbortSignal.timeout(10000) });
+    const resp = await fetch(rdapUrl);
+    if (!resp.ok) throw new Error("RDAP phản hồi lỗi " + resp.status);
 
-    if (!rdapResp.ok) {
-      throw new Error(`Không truy cập được RDAP (${rdapResp.status})`);
-    }
-
-    const rdapData = await rdapResp.json();
-
-    // Lấy thông tin cơ bản
-    const getEvent = action =>
-      rdapData.events?.find(e => e.eventAction === action)?.eventDate || null;
-
-    const formatDate = d =>
-      d ? new Date(d).toISOString().split('T')[0] : 'Không xác định';
+    const data = await resp.json();
+    const getEvent = a => data.events?.find(e => e.eventAction === a)?.eventDate || null;
+    const fmt = d => (d ? new Date(d).toISOString().split("T")[0] : "Không có");
 
     const result = {
-      domain: cleanDomain,
+      domain: clean,
       registrar:
-        rdapData.entities?.find(e => e.roles?.includes('registrar'))?.vcardArray?.[1]?.find(
-          i => i[0] === 'fn'
-        )?.[3] || 'Không xác định',
-      created: formatDate(getEvent('registration')),
-      updated: formatDate(getEvent('last changed')),
-      expires: formatDate(getEvent('expiration')),
-      status: rdapData.status || [],
-      nameservers: rdapData.nameservers?.map(ns => ns.ldhName) || [],
-      dnssec: rdapData.secureDNS?.delegationSigned ? 'Bật' : 'Tắt',
-      source: 'rdap.org',
+        data.entities?.find(e => e.roles?.includes("registrar"))?.vcardArray?.[1]?.find(i => i[0] === "fn")?.[3] ||
+        "Không xác định",
+      created: fmt(getEvent("registration")),
+      updated: fmt(getEvent("last changed")),
+      expires: fmt(getEvent("expiration")),
+      nameservers: data.nameservers?.map(ns => ns.ldhName) || [],
+      dnssec: data.secureDNS?.delegationSigned ? "Bật" : "Tắt",
+      source: rdapUrl,
       timestamp: new Date().toISOString()
     };
 
-    return new Response(JSON.stringify(result, null, 2), {
-      status: 200,
-      headers: corsHeaders
+    return new Response(JSON.stringify(result, null, 2), { status: 200, headers: cors });
+  } catch (e) {
+    return new Response(JSON.stringify({ error: e.message, note: "Không thể tra RDAP" }), {
+      status: 500,
+      headers: cors
     });
-  } catch (err) {
-    return new Response(
-      JSON.stringify({
-        error: err.message,
-        message: 'Không thể tra RDAP cho domain này',
-        note: 'Có thể domain không tồn tại hoặc RDAP registry chưa hỗ trợ.'
-      }),
-      { status: 500, headers: corsHeaders }
-    );
   }
 }
