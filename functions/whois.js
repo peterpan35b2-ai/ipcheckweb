@@ -1,11 +1,11 @@
-// Cloudflare Pages Function – WHOIS lookup bằng RDAP, hỗ trợ nhiều TLD
+// Cloudflare Pages Function – WHOIS lookup dùng RDAP.org (ổn định cho mọi TLD)
 
 export async function onRequest(context) {
   const { request } = context;
   const url = new URL(request.url);
   const domain = url.searchParams.get("domain");
 
-  const cors = {
+  const headers = {
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Methods": "GET, OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type",
@@ -13,42 +13,23 @@ export async function onRequest(context) {
   };
 
   if (request.method === "OPTIONS")
-    return new Response(null, { headers: cors });
+    return new Response(null, { headers });
 
   if (!domain)
     return new Response(JSON.stringify({ error: "Thiếu domain" }), {
-      status: 400,
-      headers: cors
+      status: 400, headers
     });
 
   const clean = domain.replace(/^https?:\/\//, "").replace(/\/$/, "").split("/")[0];
-  const tld = clean.split(".").pop().toLowerCase();
-
-  // Danh sách RDAP servers phổ biến
-  const rdapServers = {
-    com:  "https://rdap.verisign.com/com/v1/domain/",
-    net:  "https://rdap.verisign.com/net/v1/domain/",
-    org:  "https://rdap.publicinterestregistry.net/rdap/org/domain/",
-    info: "https://rdap.afilias.net/rdap/info/domain/",
-    biz:  "https://rdap.neustar.biz/domain/",
-    xyz:  "https://rdap.nic.xyz/domain/",
-    io:   "https://rdap.nic.io/domain/",
-    dev:  "https://rdap.googleapis.com/domain/",
-    app:  "https://rdap.googleapis.com/domain/",
-    me:   "https://rdap.nic.me/domain/",
-    us:   "https://rdap.neustar.biz/domain/",
-    uk:   "https://rdap.nominet.uk/domain/",
-    ca:   "https://rdap.ca.fury.ca/domain/",
-    jp:   "https://rdap.jprs.jp/domain/",
-    vn:   "https://rdap.vnnic.vn/rdap/domain/"
-  };
-
-  const rdapUrl = (rdapServers[tld] || "https://rdap.org/domain/") + clean;
 
   try {
-    const resp = await fetch(rdapUrl);
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 8000);
+    const resp = await fetch(`https://rdap.org/domain/${clean}`, { signal: controller.signal });
+    clearTimeout(timeout);
+
     if (!resp.ok)
-      throw new Error(`RDAP phản hồi lỗi ${resp.status}`);
+      throw new Error(`RDAP.org phản hồi lỗi ${resp.status}`);
 
     const data = await resp.json();
     const getEvent = a => data.events?.find(e => e.eventAction === a)?.eventDate || null;
@@ -65,15 +46,14 @@ export async function onRequest(context) {
       nameservers: data.nameservers?.map(ns => ns.ldhName) || [],
       dnssec: data.secureDNS?.delegationSigned ? "Bật" : "Tắt",
       status: data.status || [],
-      source: rdapUrl,
+      source: "https://rdap.org",
       timestamp: new Date().toISOString()
     };
 
-    return new Response(JSON.stringify(result, null, 2), { status: 200, headers: cors });
+    return new Response(JSON.stringify(result, null, 2), { status: 200, headers });
   } catch (e) {
-    return new Response(JSON.stringify({ error: e.message, note: "Không thể tra RDAP" }), {
-      status: 500,
-      headers: cors
+    return new Response(JSON.stringify({ error: e.message, note: "Không thể tra RDAP.org" }), {
+      status: 500, headers
     });
   }
 }
