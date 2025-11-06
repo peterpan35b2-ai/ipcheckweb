@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>WHOIS Lookup - Check Tools</title>
+  <link rel="stylesheet" href="css/style.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🔍</text></svg>">
+</head>
+<body>
+  <div class="container">
+    
+    <a href="index.html" class="back-btn">← Quay lại</a>
+
+    <header class="tool-header">
+      <div class="tool-icon">🔍</div>
+      <h1>WHOIS Lookup</h1>
+      <p>Tra cứu thông tin đăng ký domain và nameservers</p>
+    </header>
+
+    <div class="tool-box">
+      <div class="input-group">
+        <input 
+          type="text" 
+          id="domainInput" 
+          placeholder="Nhập domain (ví dụ: google.com)"
+          class="input-field"
+        />
+        <button id="checkBtn" class="btn-primary">
+          <span id="btnText">Tra cứu</span>
+        </button>
+      </div>
+    </div>
+
+    <div id="resultSection" class="domain-result-box hidden">
+      
+      <div class="domain-header">
+        <div class="domain-icon">📄</div>
+        <div>
+          <div class="domain-name" id="domainName">-</div>
+          <div class="domain-ip" id="registrar">-</div>
+        </div>
+      </div>
+
+      <div class="location-info">
+        <h3 class="section-title">📅 Thông tin đăng ký</h3>
+        <div class="info-grid">
+          
+          <div class="info-item">
+            <div class="info-icon">🎂</div>
+            <div>
+              <div class="info-label">Ngày tạo</div>
+              <div id="created" class="info-value">-</div>
+            </div>
+          </div>
+
+          <div class="info-item">
+            <div class="info-icon">🔄</div>
+            <div>
+              <div class="info-label">Cập nhật lần cuối</div>
+              <div id="updated" class="info-value">-</div>
+            </div>
+          </div>
+
+          <div class="info-item">
+            <div class="info-icon">⏰</div>
+            <div>
+              <div class="info-label">Ngày hết hạn</div>
+              <div id="expires" class="info-value">-</div>
+            </div>
+          </div>
+
+          <div class="info-item">
+            <div class="info-icon">🔒</div>
+            <div>
+              <div class="info-label">DNSSEC</div>
+              <div id="dnssec" class="info-value">-</div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+      <div class="additional-info">
+        <div class="info-row">
+          <span class="info-label">📊 Trạng thái:</span>
+          <span id="status" class="info-value">-</span>
+        </div>
+        <div class="info-row">
+          <span class="info-label">🌐 Nameservers:</span>
+          <span id="nameservers" class="info-value">-</span>
+        </div>
+      </div>
+
+    </div>
+
+    <div id="historySection" class="history-section hidden">
+      <div class="history-header">
+        <h3>📋 Lịch sử tra cứu</h3>
+        <button id="clearHistoryBtn" class="btn-clear">Xóa</button>
+      </div>
+      <div id="historyList" class="history-list"></div>
+    </div>
+
+  </div>
+
+  <script src="js/main.js"></script>
+  <script>
+    const domainInput = document.getElementById('domainInput');
+    const checkBtn = document.getElementById('checkBtn');
+    const btnText = document.getElementById('btnText');
+    const resultSection = document.getElementById('resultSection');
+    const historySection = document.getElementById('historySection');
+    const historyList = document.getElementById('historyList');
+    const clearHistoryBtn = document.getElementById('clearHistoryBtn');
+
+    let history = [];
+    try {
+      history = JSON.parse(localStorage.getItem('whoisCheckHistory') || '[]');
+    } catch (e) {
+      history = [];
+    }
+
+    domainInput.addEventListener('keypress', (e) => {
+      if (e.key === 'Enter') checkWhois();
+    });
+
+    checkBtn.addEventListener('click', checkWhois);
+    clearHistoryBtn.addEventListener('click', () => {
+      if (confirm('Xóa toàn bộ lịch sử?')) {
+        history = [];
+        localStorage.setItem('whoisCheckHistory', '[]');
+        renderHistory();
+      }
+    });
+
+    async function checkWhois() {
+      let domain = domainInput.value.trim().toLowerCase();
+      if (!domain) {
+        alert('⚠️ Vui lòng nhập domain');
+        return;
+      }
+
+      domain = domain.replace(/^https?:\/\//, '').replace(/\/$/, '');
+
+      setLoading(true);
+      resultSection.classList.add('hidden');
+
+      try {
+        const response = await fetch(`/whois?domain=${encodeURIComponent(domain)}`);
+        
+        const contentType = response.headers.get('content-type');
+        if (!contentType || !contentType.includes('application/json')) {
+          throw new Error('API error');
+        }
+        
+        const data = await response.json();
+        
+        if (data.error) {
+          alert('❌ ' + (data.message || data.error));
+          return;
+        }
+
+        displayResult(data);
+        addToHistory(data);
+      } catch (error) {
+        console.error('Error:', error);
+        alert('❌ Lỗi: ' + error.message);
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    function setLoading(loading) {
+      checkBtn.disabled = loading;
+      domainInput.disabled = loading;
+      btnText.textContent = loading ? 'Đang tra cứu...' : 'Tra cứu';
+    }
+
+    function displayResult(data) {
+      resultSection.classList.remove('hidden');
+
+      document.getElementById('domainName').textContent = data.domain || '-';
+      document.getElementById('registrar').textContent = data.registrar || 'Unknown';
+      document.getElementById('created').textContent = formatDate(data.created) || 'Không xác định';
+      document.getElementById('updated').textContent = formatDate(data.updated) || 'Không xác định';
+      document.getElementById('expires').textContent = formatDate(data.expires) || 'Không xác định';
+      document.getElementById('dnssec').textContent = data.dnssec || 'Unknown';
+      
+      const statusText = Array.isArray(data.status) 
+        ? data.status.filter(s => s).join(', ') 
+        : (data.status || 'Unknown');
+      document.getElementById('status').textContent = statusText;
+      
+      const nsText = Array.isArray(data.nameservers) 
+        ? data.nameservers.filter(ns => ns).join(', ') 
+        : (data.nameservers || 'Unknown');
+      document.getElementById('nameservers').textContent = nsText;
+    }
+
+    function formatDate(dateStr) {
+      if (!dateStr) return null;
+      try {
+        const date = new Date(dateStr);
+        return date.toLocaleDateString('vi-VN', {
+          year: 'numeric',
+          month: '2-digit',
+          day: '2-digit'
+        });
+      } catch (e) {
+        return dateStr;
+      }
+    }
+
+    function addToHistory(data) {
+      const item = {
+        domain: data.domain,
+        registrar: data.registrar,
+        expires: data.expires,
+        timestamp: new Date().toLocaleString('vi-VN')
+      };
+      
+      history.unshift(item);
+      history = history.slice(0, 10);
+      localStorage.setItem('whoisCheckHistory', JSON.stringify(history));
+      renderHistory();
+    }
+
+    function renderHistory() {
+      if (history.length === 0) {
+        historySection.classList.add('hidden');
+        return;
+      }
+      
+      historySection.classList.remove('hidden');
+      historyList.innerHTML = history.map(item => `
+        <div class="history-item" onclick="domainInput.value='${escapeHtml(item.domain)}'; checkWhois();">
+          <div class="history-icon">📄</div>
+          <div class="history-content">
+            <div class="history-url">${escapeHtml(item.domain)}</div>
+            <div class="history-time">${item.timestamp}</div>
+          </div>
+          <div class="history-meta">
+            ${escapeHtml(item.registrar || '')}
+          </div>
+        </div>
+      `).join('');
+    }
+
+    function escapeHtml(text) {
+      if (!text) return '';
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+
+    renderHistory();
+  </script>
+</body>
+</html>
