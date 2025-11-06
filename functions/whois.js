@@ -1,4 +1,4 @@
-// Cloudflare Pages Function – RDAP WHOIS lookup (tự chọn RDAP server theo TLD)
+// Cloudflare Pages Function – WHOIS lookup (ổn định, có fallback & timeout)
 
 export async function onRequest(context) {
   const { request } = context;
@@ -12,7 +12,8 @@ export async function onRequest(context) {
     "Content-Type": "application/json"
   };
 
-  if (request.method === "OPTIONS") return new Response(null, { headers });
+  if (request.method === "OPTIONS")
+    return new Response(null, { headers });
 
   if (!domain)
     return new Response(JSON.stringify({ error: "Thiếu domain" }), {
@@ -23,7 +24,7 @@ export async function onRequest(context) {
   const clean = domain.replace(/^https?:\/\//, "").replace(/\/$/, "").split("/")[0];
   const tld = clean.split(".").pop().toLowerCase();
 
-  // RDAP servers chính thức của nhiều TLD
+  // RDAP servers phổ biến
   const servers = {
     com: "https://rdap.verisign.com/com/v1/domain/",
     net: "https://rdap.verisign.com/net/v1/domain/",
@@ -46,12 +47,22 @@ export async function onRequest(context) {
 
   try {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 8000);
-    const resp = await fetch(rdapUrl, {
-      signal: controller.signal,
-      headers: { "User-Agent": "Mozilla/5.0 (Cloudflare RDAP Lookup)" }
-    });
-    clearTimeout(timeout);
+    const timeout = setTimeout(() => controller.abort(), 15000);
+
+    let resp;
+    try {
+      resp = await fetch(rdapUrl, {
+        signal: controller.signal,
+        headers: { "User-Agent": "Mozilla/5.0 (Cloudflare RDAP Lookup)" }
+      });
+    } catch (e) {
+      // Fallback nếu RDAP chính không phản hồi
+      resp = await fetch("https://rdap.verisign.com/com/v1/domain/" + clean, {
+        headers: { "User-Agent": "Mozilla/5.0 (Fallback RDAP)" }
+      });
+    } finally {
+      clearTimeout(timeout);
+    }
 
     if (!resp.ok)
       throw new Error(`RDAP phản hồi lỗi ${resp.status}`);
@@ -78,9 +89,12 @@ export async function onRequest(context) {
 
     return new Response(JSON.stringify(result, null, 2), { status: 200, headers });
   } catch (e) {
-    return new Response(JSON.stringify({ error: e.message, note: "Không thể tra RDAP" }), {
-      status: 500,
-      headers
-    });
+    return new Response(
+      JSON.stringify({
+        error: e.message,
+        note: "Không thể tra RDAP (có thể do chậm hoặc bị chặn)"
+      }),
+      { status: 500, headers }
+    );
   }
 }
