@@ -1,4 +1,4 @@
-// Cloudflare Pages Function – WHOIS lookup (ổn định, có fallback & timeout)
+// Cloudflare Pages Function – WHOIS lookup (ổn định, dùng Vercel proxy RDAP, timeout + fallback)
 
 export async function onRequest(context) {
   const { request } = context;
@@ -22,68 +22,110 @@ export async function onRequest(context) {
     });
 
   const clean = domain.replace(/^https?:\/\//, "").replace(/\/$/, "").split("/")[0];
-  const tld = clean.split(".").pop().toLowerCase();
+  if (!/^[a-z0-9-]+\.[a-z.]{2,}$/i.test(clean)) {
+    return new Response(JSON.stringify({ error: "Domain không hợp lệ", domain: clean }), {
+      status: 400,
+      headers
+    });
+  }
 
-  // RDAP servers phổ biến
-  const servers = {
-    com: "https://rdap.verisign.com/com/v1/domain/",
-    net: "https://rdap.verisign.com/net/v1/domain/",
-    org: "https://rdap.publicinterestregistry.net/rdap/org/domain/",
-    info: "https://rdap.afilias.net/rdap/info/domain/",
-    biz: "https://rdap.neustar.biz/domain/",
-    xyz: "https://rdap.nic.xyz/domain/",
-    io: "https://rdap.nic.io/domain/",
-    dev: "https://rdap.googleapis.com/domain/",
-    app: "https://rdap.googleapis.com/domain/",
-    me: "https://rdap.nic.me/domain/",
-    us: "https://rdap.neustar.biz/domain/",
-    uk: "https://rdap.nominet.uk/domain/",
-    ca: "https://rdap.ca.fury.ca/domain/",
-    jp: "https://rdap.jprs.jp/domain/",
-    vn: "https://rdap.vnnic.vn/rdap/domain/"
-  };
-
-  const rdapUrl = (servers[tld] || servers["com"]) + clean;
+  // Proxy RDAP (Vercel) — đổi nếu dùng URL proxy khác
+  const proxyBase = "https://rdap-proxy1.vercel.app/api/rdap?domain=";
+  const proxyUrl = proxyBase + encodeURIComponent(clean);
 
   try {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 15000);
+    const timeout = setTimeout(() => controller.abort(), 15000); // 15s
 
     let resp;
     try {
-      resp = await fetch(rdapUrl, {
+      resp = await fetch(proxyUrl, {
         signal: controller.signal,
-        headers: { "User-Agent": "Mozilla/5.0 (Cloudflare RDAP Lookup)" }
+        headers: { "User-Agent": "Mozilla/5.0 (Cloudflare -> RDAP Proxy)" }
       });
-    } catch (e) {
-      // Fallback nếu RDAP chính không phản hồi
-      resp = await fetch("https://rdap.verisign.com/com/v1/domain/" + clean, {
-        headers: { "User-Agent": "Mozilla/5.0 (Fallback RDAP)" }
-      });
+    } catch (fetchErr) {
+      clearTimeout(timeout);
+      // nếu call tới proxy thất bại, trả lỗi rõ ràng
+      return new Response(
+        JSON.stringify({
+          error: "Không thể liên lạc proxy RDAP",
+          detail: fetchErr.message || String(fetchErr),
+          note: "Kiểm tra proxy (Vercel) hoặc mạng."
+        }),
+        { status: 502, headers }
+      );
     } finally {
       clearTimeout(timeout);
     }
 
-    if (!resp.ok)
-      throw new Error(`RDAP phản hồi lỗi ${resp.status}`);
+    // Nếu proxy trả 404 (registry không có dữ liệu)
+    if (resp.status === 404) {
+      return new Response(
+        JSON.stringify({
+          domain: clean,
+          message: "Tên miền chưa đăng ký hoặc RDAP không có dữ liệu (404)",
+          source: proxyUrl,
+          timestamp: new Date().toISOString()
+        }),
+        { status: 200, headers }
+      );
+    }
 
-    const data = await resp.json();
+    // Nếu proxy trả lỗi khác
+    if (!resp.ok) {
+      return new Response(
+        JSON.stringify({
+          error: `Proxy RDAP trả lỗi ${resp.status}`,
+          source: proxyUrl,
+          timestamp: new Date().toISOString()
+        }),
+        { status: 502, headers }
+      );
+    }
 
+    const body = await resp.json().catch(() => ({}));
+    // Proxy format: { domain, status, source, data }
+    const data = body.data || body; // trong trường hợp proxy trả thẳng json RDAP
+
+    // Nếu registry trả 404 bên trong data (một vài proxy có thể báo trong data)
+    if (body.status === 404) {
+      return new Response(
+        JSON.stringify({
+          domain: clean,
+          message: "Tên miền chưa đăng ký hoặc RDAP không có dữ liệu (registry 404)",
+          source: body.source || proxyUrl,
+          timestamp: new Date().toISOString()
+        }),
+        { status: 200, headers }
+      );
+    }
+
+    // Hỗ trợ lấy các trường cơ bản từ response RDAP (data)
     const getEvent = a => data.events?.find(e => e.eventAction === a)?.eventDate || null;
-    const fmt = d => (d ? new Date(d).toISOString().split("T")[0] : "Không có");
+    const fmt = d => {
+      try {
+        return d ? new Date(d).toISOString().split("T")[0] : "Không có";
+      } catch {
+        return "Không có";
+      }
+    };
+
+    const registrar =
+      data.entities?.find(e => e.roles?.includes("registrar"))?.vcardArray?.[1]?.find(i => i[0] === "fn")?.[3] ||
+      (data.registrar && data.registrar) ||
+      "Không xác định";
 
     const result = {
       domain: clean,
-      registrar:
-        data.entities?.find(e => e.roles?.includes("registrar"))?.vcardArray?.[1]?.find(i => i[0] === "fn")?.[3] ||
-        "Không xác định",
+      registrar,
       created: fmt(getEvent("registration")),
       updated: fmt(getEvent("last changed")),
       expires: fmt(getEvent("expiration")),
-      nameservers: data.nameservers?.map(ns => ns.ldhName) || [],
-      dnssec: data.secureDNS?.delegationSigned ? "Bật" : "Tắt",
+      nameservers: data.nameservers?.map(ns => ns.ldhName) || data.name_servers || [],
+      dnssec: data.secureDNS?.delegationSigned ? "Bật" : (data.secureDNS?.delegationSigned === false ? "Tắt" : "Không xác định"),
       status: data.status || [],
-      source: rdapUrl,
+      raw: data, // trả luôn dữ liệu gốc để debug / hiển thị chi tiết
+      source: body.source || proxyUrl,
       timestamp: new Date().toISOString()
     };
 
@@ -91,8 +133,9 @@ export async function onRequest(context) {
   } catch (e) {
     return new Response(
       JSON.stringify({
-        error: e.message,
-        note: "Không thể tra RDAP (có thể do chậm hoặc bị chặn)"
+        error: e.message || String(e),
+        note: "Không thể tra RDAP (có thể do proxy chậm hoặc bị chặn)",
+        timestamp: new Date().toISOString()
       }),
       { status: 500, headers }
     );
