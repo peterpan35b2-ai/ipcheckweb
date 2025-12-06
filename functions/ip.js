@@ -1,245 +1,246 @@
-// /functions/ip.js - Main IP API endpoint
+// API: /ip
 export async function onRequest(context) {
   const { request } = context;
   
-  // CORS headers
   const corsHeaders = {
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Methods': 'GET, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type',
     'Content-Type': 'application/json',
-    'Cache-Control': 'public, max-age=60'
+    'X-Content-Type-Options': 'nosniff'
   };
 
-  // Handle OPTIONS preflight
   if (request.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
   }
 
   try {
-    // Collect all possible IP headers
-    const ipHeaders = {
-      'cf-connecting-ip': request.headers.get('cf-connecting-ip'),
-      'x-real-ip': request.headers.get('x-real-ip'),
-      'x-forwarded-for': request.headers.get('x-forwarded-for'),
-      'true-client-ip': request.headers.get('true-client-ip'),
-    };
+    // Ưu tiên lấy IP từ Cloudflare headers
+    let ip = request.headers.get('cf-connecting-ip') || 'Unknown';
     
-    // Detect IPv4 and IPv6 separately
-    let ipv4 = null;
-    let ipv6 = null;
-    let primaryIp = request.headers.get('cf-connecting-ip') || 'Unknown';
-    
-    // Check all headers for IP addresses
-    Object.entries(ipHeaders).forEach(([header, value]) => {
-      if (!value) return;
-      
-      // Handle comma-separated lists (x-forwarded-for)
-      const ips = value.split(',').map(ip => ip.trim()).filter(ip => ip && ip !== '');
-      
-      ips.forEach(ip => {
-        if (isIPv4(ip) && !ipv4) {
-          ipv4 = ip;
-        } else if (isIPv6(ip) && !ipv6) {
-          ipv6 = ip;
-        }
-      });
-    });
-    
-    // If only one IP found, determine if it's v4 or v6
-    if (primaryIp && primaryIp !== 'Unknown') {
-      if (isIPv4(primaryIp)) {
-        ipv4 = primaryIp;
-      } else if (isIPv6(primaryIp)) {
-        ipv6 = primaryIp;
-      }
+    // Nếu là IPv6 localhost hoặc test, thử lấy từ header khác
+    if (ip === '::1' || ip.startsWith('fe80:') || ip === 'Unknown') {
+      ip = request.headers.get('x-real-ip') || 
+           request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || 
+           ip;
     }
     
-    // Get Cloudflare data
+    const country = request.headers.get('cf-ipcountry') || 'Unknown';
+    const userAgent = request.headers.get('user-agent') || 'Unknown';
+    
+    // Sử dụng dữ liệu từ Cloudflare (có sẵn và miễn phí)
     const cf = request.cf || {};
-    const userAgent = request.headers.get('user-agent') || '';
     
-    // Determine ISP information
-    let ispInfo = {
-      name: cf.asOrganization || 'Không xác định',
-      organization: cf.asOrganization || '',
-      asn: cf.asn || null
-    };
+    // Xác định phiên bản IP
+    const ipVersion = getIPVersion(ip);
     
-    // Try to get more detailed info from external API if needed
-    if (!ispInfo.name || ispInfo.name === 'Không xác định') {
-      try {
-        const testIp = ipv4 || ipv6 || primaryIp;
-        if (testIp && testIp !== 'Unknown') {
-          const externalResponse = await fetch(`https://ipapi.co/${testIp}/json/`, {
-            headers: { 'User-Agent': 'CheckTools/1.0' },
-            signal: AbortSignal.timeout(3000)
-          });
-          
-          if (externalResponse.ok) {
-            const externalData = await externalResponse.json();
-            
-            // Update ISP info
-            ispInfo.name = externalData.org || externalData.asn || 'Không xác định';
-            ispInfo.organization = externalData.org || '';
-            ispInfo.asn = externalData.asn ? externalData.asn.replace('AS', '') : cf.asn;
-            
-            // Update location if Cloudflare doesn't have it
-            if (!cf.country && externalData.country) {
-              cf.country = externalData.country;
-              cf.region = externalData.region;
-              cf.city = externalData.city;
-              cf.postalCode = externalData.postal;
-              cf.timezone = externalData.timezone;
-              cf.latitude = externalData.latitude;
-              cf.longitude = externalData.longitude;
-            }
-          }
-        }
-      } catch (e) {
-        console.log('External API lookup failed:', e.message);
+    // Lấy thông tin ISP từ ASN của Cloudflare
+    let ispInfo = await getISPFromASN(cf.asn, ip);
+    
+    // Chuẩn hóa tên tỉnh/thành phố cho Việt Nam
+    let province = cf.region || null;
+    let city = cf.city || null;
+    
+    if (cf.country === 'VN' || country === 'VN') {
+      province = convertVNProvince(province);
+      city = convertVNCity(city, province);
+      
+      // Nếu có ISP từ ASN nhưng chưa rõ, thử dự đoán từ IP
+      if (!ispInfo.name || ispInfo.name === 'Unknown') {
+        ispInfo = predictVNISP(ip, ispInfo);
       }
     }
     
-    // Detect Vietnamese ISP
-    const vnISP = detectVNISP(ispInfo.name, ipv4 || ipv6 || primaryIp);
-    
-    // Process Vietnamese province names
-    let province = cf.region || '';
-    if (cf.country === 'VN' && province) {
-      province = convertVNProvince(province);
-    }
-    
-    // Prepare response data
+    // Tạo response data
     const responseData = {
       ip: {
-        primary: primaryIp,
-        ipv4: ipv4,
-        ipv6: ipv6,
-        version: primaryIp.includes(':') ? 'IPv6' : 'IPv4',
-        hasIPv4: !!ipv4,
-        hasIPv6: !!ipv6
+        address: ip,
+        version: ipVersion,
+        type: cf.ipVersion || ipVersion
       },
       location: {
-        countryCode: cf.country || 'N/A',
-        country: getCountryName(cf.country) || 'N/A',
+        country: cf.country || country,
+        countryName: getCountryName(cf.country || country),
         province: province,
-        city: cf.city || '',
-        postalCode: cf.postalCode || '',
-        timezone: cf.timezone || '',
+        city: city,
         latitude: cf.latitude || null,
-        longitude: cf.longitude || null
+        longitude: cf.longitude || null,
+        timezone: cf.timezone || null,
+        postalCode: cf.postalCode || null
       },
       network: {
-        isp: vnISP,
+        isp: ispInfo.name,
         organization: ispInfo.organization,
-        asn: ispInfo.asn,
-        asnName: ispInfo.asn ? `AS${ispInfo.asn}` : null,
+        asn: cf.asn || ispInfo.asn,
+        asnName: ispInfo.asnName,
         connectionType: getConnectionType(cf),
         mobileCarrier: cf.mobileCarrier || null
       },
       client: {
         userAgent: userAgent,
-        browser: parseBrowser(userAgent),
-        device: parseDevice(userAgent)
+        browser: parseUserAgent(userAgent)
       },
       cloudflare: {
         colo: cf.colo || null,
         regionCode: cf.regionCode || null,
         metroCode: cf.metroCode || null,
-        continent: cf.continent || null,
-        isIPv6: cf.isIPv6 || primaryIp.includes(':')
+        continent: cf.continent || null
       },
-      headers: Object.fromEntries(
-        Object.entries(ipHeaders).filter(([_, v]) => v !== null)
-      ),
       timestamp: new Date().toISOString(),
-      source: 'Cloudflare Pages'
+      source: 'Cloudflare Worker'
     };
     
     return new Response(
-      JSON.stringify(responseData, null, 2),
+      JSON.stringify(responseData),
       { status: 200, headers: corsHeaders }
     );
-    
-  } catch (error) {
-    console.error('Error in /ip endpoint:', error);
+
+  } catch (err) {
+    console.error('Error in IP API:', err);
     return new Response(
       JSON.stringify({ 
-        error: error.message,
+        error: err.message,
         message: 'Cannot get IP information'
       }),
-      { 
-        status: 500, 
-        headers: { 
-          'Content-Type': 'application/json',
-          'Access-Control-Allow-Origin': '*' 
-        } 
-      }
+      { status: 500, headers: corsHeaders }
     );
   }
 }
 
 // Helper Functions
-function isIPv4(ip) {
-  if (!ip) return false;
-  const ipv4Regex = /^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$/;
-  return ipv4Regex.test(ip);
-}
-
-function isIPv6(ip) {
-  if (!ip) return false;
-  // Basic IPv6 check
+function getIPVersion(ip) {
+  if (!ip || ip === 'Unknown') return 'Unknown';
+  
   if (ip.includes(':')) {
-    const parts = ip.split(':');
-    return parts.length >= 2 && parts.length <= 8;
+    // Kiểm tra IPv6
+    const ipv6Regex = /^(([0-9a-fA-F]{1,4}:){7,7}[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,7}:|([0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,5}(:[0-9a-fA-F]{1,4}){1,2}|([0-9a-fA-F]{1,4}:){1,4}(:[0-9a-fA-F]{1,4}){1,3}|([0-9a-fA-F]{1,4}:){1,3}(:[0-9a-fA-F]{1,4}){1,4}|([0-9a-fA-F]{1,4}:){1,2}(:[0-9a-fA-F]{1,4}){1,5}|[0-9a-fA-F]{1,4}:((:[0-9a-fA-F]{1,4}){1,6})|:((:[0-9a-fA-F]{1,4}){1,7}|:)|fe80:(:[0-9a-fA-F]{0,4}){0,4}%[0-9a-zA-Z]{1,}|::(ffff(:0{1,4}){0,1}:){0,1}((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])|([0-9a-fA-F]{1,4}:){1,4}:((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9]))$/;
+    return ipv6Regex.test(ip) ? 'IPv6' : 'Unknown';
   }
-  return false;
+  
+  // Kiểm tra IPv4
+  const ipv4Regex = /^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$/;
+  return ipv4Regex.test(ip) ? 'IPv4' : 'Unknown';
 }
 
-function detectVNISP(isp, ip) {
-  if (!isp || isp === 'Không xác định') {
-    // Try to predict from IP ranges
-    if (ip) {
-      if (ip.startsWith('14.') || ip.startsWith('113.') || ip.startsWith('117.') || ip.startsWith('118.') || ip.startsWith('180.')) {
-        return 'VNPT';
-      }
-      if (ip.startsWith('27.') || ip.startsWith('42.') || ip.startsWith('115.') || ip.startsWith('116.') || 
-          ip.startsWith('125.') || ip.startsWith('175.') || ip.startsWith('183.') || ip.startsWith('210.') || 
-          ip.startsWith('222.') || ip.startsWith('171.') || ip.startsWith('2405:4800')) {
-        return 'Viettel';
-      }
-      if (ip.startsWith('58.') || ip.startsWith('123.') || ip.startsWith('2405:8a00')) {
-        return 'FPT';
-      }
-      if (ip.startsWith('240.') || ip.startsWith('2405:9700')) {
-        return 'MobiFone';
-      }
-      if (ip.startsWith('2405:9800')) {
-        return 'Vinaphone';
+async function getISPFromASN(asn, ip) {
+  if (!asn) {
+    return {
+      name: 'Unknown',
+      organization: 'Unknown',
+      asn: null,
+      asnName: null
+    };
+  }
+  
+  // ASN mapping cho các nhà mạng phổ biến
+  const asnMap = {
+    // Việt Nam
+    'AS45899': { name: 'VNPT', organization: 'Vietnam Posts and Telecommunications Group', country: 'VN' },
+    'AS7552': { name: 'Viettel', organization: 'Viettel Corporation', country: 'VN' },
+    'AS18403': { name: 'FPT', organization: 'FPT Telecom', country: 'VN' },
+    'AS45543': { name: 'MobiFone', organization: 'MobiFone Corporation', country: 'VN' },
+    'AS38731': { name: 'Vinaphone', organization: 'Vinaphone', country: 'VN' },
+    'AS55378': { name: 'CMC', organization: 'CMC Telecom', country: 'VN' },
+    'AS131414': { name: 'Vietnamobile', organization: 'Vietnamobile', country: 'VN' },
+    
+    // Quốc tế
+    'AS15169': { name: 'Google', organization: 'Google LLC', country: 'US' },
+    'AS16509': { name: 'Amazon', organization: 'Amazon.com, Inc.', country: 'US' },
+    'AS8075': { name: 'Microsoft', organization: 'Microsoft Corporation', country: 'US' },
+    'AS13335': { name: 'Cloudflare', organization: 'Cloudflare, Inc.', country: 'US' },
+    'AS14061': { name: 'DigitalOcean', organization: 'DigitalOcean, LLC', country: 'US' },
+    'AS63949': { name: 'Linode', organization: 'Linode, LLC', country: 'US' },
+    'AS16276': { name: 'OVH', organization: 'OVH SAS', country: 'FR' },
+    'AS45102': { name: 'Alibaba', organization: 'Alibaba (US) Technology Co., Ltd.', country: 'CN' },
+    'AS132203': { name: 'Tencent', organization: 'Tencent Cloud Computing', country: 'CN' }
+  };
+  
+  const asnKey = `AS${asn}`;
+  if (asnMap[asnKey]) {
+    return {
+      name: asnMap[asnKey].name,
+      organization: asnMap[asnKey].organization,
+      asn: asn,
+      asnName: asnKey
+    };
+  }
+  
+  // Nếu không có trong map, thử query từ API
+  try {
+    const response = await fetch(`https://api.bgpview.io/asn/${asn}`, {
+      signal: AbortSignal.timeout(2000)
+    });
+    
+    if (response.ok) {
+      const data = await response.json();
+      if (data.data) {
+        return {
+          name: data.data.name || 'Unknown',
+          organization: data.data.description || 'Unknown',
+          asn: asn,
+          asnName: `AS${asn}`
+        };
       }
     }
-    return 'Không xác định';
+  } catch (e) {
+    console.log('BGPView API failed');
   }
   
-  // Normalize existing ISP name
-  const ispLower = isp.toLowerCase();
-  if (ispLower.includes('viettel')) return 'Viettel';
-  if (ispLower.includes('vnpt')) return 'VNPT';
-  if (ispLower.includes('fpt')) return 'FPT';
-  if (ispLower.includes('mobifone')) return 'MobiFone';
-  if (ispLower.includes('vinaphone')) return 'Vinaphone';
-  if (ispLower.includes('cmc')) return 'CMC';
-  if (ispLower.includes('vietnamobile')) return 'Vietnamobile';
-  if (ispLower.includes('gtelecom')) return 'GTelecom';
-  if (ispLower.includes('netnam')) return 'Netnam';
+  return {
+    name: 'Unknown',
+    organization: 'Unknown',
+    asn: asn,
+    asnName: `AS${asn}`
+  };
+}
+
+function predictVNISP(ip, currentISP) {
+  const ipRanges = {
+    '14.': 'VNPT',
+    '27.': 'Viettel',
+    '42.': 'Viettel',
+    '58.': 'FPT',
+    '113.': 'VNPT',
+    '115.': 'Viettel',
+    '116.': 'Viettel',
+    '117.': 'VNPT',
+    '118.': 'VNPT',
+    '123.': 'FPT',
+    '125.': 'Viettel',
+    '171.': 'CMC',
+    '175.': 'Viettel',
+    '180.': 'VNPT',
+    '183.': 'Viettel',
+    '210.': 'Viettel',
+    '222.': 'Viettel',
+    '240.': 'MobiFone',
+    '27.64.': 'Viettel',
+    '27.65.': 'Viettel',
+    '27.66.': 'Viettel',
+    '27.67.': 'Viettel',
+    // IPv6 Việt Nam
+    '2405:4800': 'Viettel',
+    '2405:8a00': 'VNPT',
+    '2405:8a00': 'FPT',
+    '2405:9700': 'MobiFone',
+    '2405:9800': 'Vinaphone'
+  };
   
-  return isp;
+  for (const [range, isp] of Object.entries(ipRanges)) {
+    if (ip.startsWith(range)) {
+      return {
+        name: isp,
+        organization: currentISP.organization || isp,
+        asn: currentISP.asn,
+        asnName: currentISP.asnName
+      };
+    }
+  }
+  
+  return currentISP;
 }
 
 function convertVNProvince(provinceCode) {
-  if (!provinceCode) return '';
-  
   const provinces = {
     'HN': 'Hà Nội',
     'HP': 'Hải Phòng',
@@ -288,9 +289,22 @@ function convertVNProvince(provinceCode) {
   return provinces[provinceCode] || provinceCode;
 }
 
-function getCountryName(countryCode) {
-  if (!countryCode || countryCode === 'N/A') return 'N/A';
+function convertVNCity(city, province) {
+  if (!city) return null;
   
+  // Nếu đã có tên tỉnh trong city, không cần thêm
+  if (city.includes(province)) return city;
+  
+  // Thêm tỉnh cho các thành phố nhỏ
+  const majorCities = ['Hà Nội', 'Hải Phòng', 'Đà Nẵng', 'Cần Thơ', 'TP Hồ Chí Minh'];
+  if (!majorCities.includes(province)) {
+    return `${city}, ${province}`;
+  }
+  
+  return city;
+}
+
+function getCountryName(countryCode) {
   const countries = {
     'VN': 'Việt Nam',
     'US': 'United States',
@@ -306,13 +320,7 @@ function getCountryName(countryCode) {
     'FR': 'France',
     'DE': 'Germany',
     'CA': 'Canada',
-    'AU': 'Australia',
-    'IN': 'India',
-    'RU': 'Russia',
-    'BR': 'Brazil',
-    'TW': 'Taiwan',
-    'HK': 'Hong Kong',
-    'MO': 'Macao'
+    'AU': 'Australia'
   };
   
   return countries[countryCode] || countryCode;
@@ -322,34 +330,36 @@ function getConnectionType(cf) {
   if (cf.mobileCarrier) return 'Mobile';
   if (cf.clientTcpRtt && cf.clientTcpRtt < 50) return 'Wired/Fiber';
   if (cf.clientTcpRtt) return 'Wired';
-  if (cf.isIPv6) return 'IPv6 Connection';
-  return 'IPv4 Connection';
-}
-
-function parseBrowser(userAgent) {
-  if (!userAgent) return 'Unknown';
-  
-  if (userAgent.includes('Chrome') && !userAgent.includes('Edg')) return 'Chrome';
-  if (userAgent.includes('Firefox')) return 'Firefox';
-  if (userAgent.includes('Safari') && !userAgent.includes('Chrome')) return 'Safari';
-  if (userAgent.includes('Edg')) return 'Edge';
-  if (userAgent.includes('Opera')) return 'Opera';
-  if (userAgent.includes('MSIE') || userAgent.includes('Trident/')) return 'Internet Explorer';
-  
   return 'Unknown';
 }
 
-function parseDevice(userAgent) {
-  if (!userAgent) return 'Desktop';
+function parseUserAgent(ua) {
+  if (!ua) return {};
   
-  if (userAgent.includes('Mobile')) return 'Mobile';
-  if (userAgent.includes('Tablet')) return 'Tablet';
-  if (userAgent.includes('Android')) return 'Android Mobile';
-  if (userAgent.includes('iPhone')) return 'iPhone';
-  if (userAgent.includes('iPad')) return 'iPad';
-  if (userAgent.includes('Windows')) return 'Windows PC';
-  if (userAgent.includes('Mac')) return 'Mac';
-  if (userAgent.includes('Linux')) return 'Linux PC';
+  const browserInfo = {
+    name: 'Unknown',
+    version: 'Unknown',
+    os: 'Unknown',
+    device: 'Desktop'
+  };
   
-  return 'Desktop';
+  // Đơn giản hóa - trong thực tế có thể dùng library như ua-parser-js
+  if (ua.includes('Chrome')) browserInfo.name = 'Chrome';
+  else if (ua.includes('Firefox')) browserInfo.name = 'Firefox';
+  else if (ua.includes('Safari')) browserInfo.name = 'Safari';
+  else if (ua.includes('Edge')) browserInfo.name = 'Edge';
+  else if (ua.includes('Opera')) browserInfo.name = 'Opera';
+  
+  if (ua.includes('Windows')) browserInfo.os = 'Windows';
+  else if (ua.includes('Mac OS')) browserInfo.os = 'macOS';
+  else if (ua.includes('Linux')) browserInfo.os = 'Linux';
+  else if (ua.includes('Android')) {
+    browserInfo.os = 'Android';
+    browserInfo.device = 'Mobile';
+  } else if (ua.includes('iPhone') || ua.includes('iPad')) {
+    browserInfo.os = 'iOS';
+    browserInfo.device = ua.includes('iPad') ? 'Tablet' : 'Mobile';
+  }
+  
+  return browserInfo;
 }
