@@ -4,44 +4,86 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Kiểm tra IP của bạn - Check Tools</title>
-  <meta name="description" content="Kiểm tra địa chỉ IP, vị trí, nhà cung cấp dịch vụ của bạn">
+  <meta name="description" content="Kiểm tra địa chỉ IPv4, IPv6, vị trí, nhà cung cấp dịch vụ của bạn">
   <link rel="stylesheet" href="css/style.css">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📡</text></svg>">
   <style>
-    /* Additional styles for IP check page using your theme */
+    /* Additional styles for IP check page */
     :root {
-      --ipv4: #10b981;  /* success color */
-      --ipv6: #3b82f6;  /* accent color */
+      --ipv4: #10b981;
+      --ipv6: #3b82f6;
+      --warning: #f59e0b;
     }
     
     .ip-result-box {
       margin-bottom: 2rem;
+      position: relative;
     }
     
     .ip-display {
-      position: relative;
       text-align: center;
       padding: 2rem;
       background: var(--bg-dark);
       border-radius: 0.75rem;
       margin-bottom: 2rem;
       border: 2px solid var(--border);
+      transition: all 0.3s ease;
     }
     
     .ip-display:hover {
       border-color: var(--accent);
       transform: translateY(-2px);
-      transition: all 0.3s ease;
+      box-shadow: 0 8px 24px var(--shadow);
+    }
+    
+    .ip-version-group {
+      margin-bottom: 1.5rem;
+      padding: 1.5rem;
+      background: rgba(30, 41, 59, 0.5);
+      border-radius: 0.75rem;
+      border: 1px solid var(--border);
+    }
+    
+    .ip-version-group:last-child {
+      margin-bottom: 0;
+    }
+    
+    .ip-version-label {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      font-size: 0.9rem;
+      color: var(--text-secondary);
+      margin-bottom: 0.75rem;
+      font-weight: 500;
+    }
+    
+    .ip-version-value {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+      flex-wrap: wrap;
+    }
+    
+    .ip-address {
+      font-family: 'Courier New', monospace;
+      font-size: 1.5rem;
+      font-weight: 600;
+      color: var(--text-primary);
+      word-break: break-all;
+      flex: 1;
+      min-width: 200px;
     }
     
     .ip-version-badge {
       display: inline-block;
-      padding: 0.3rem 0.8rem;
+      padding: 0.4rem 1rem;
       border-radius: 20px;
-      font-size: 0.75rem;
+      font-size: 0.8rem;
       font-weight: 700;
-      margin-left: 0.75rem;
-      vertical-align: middle;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
     }
     
     .badge-ipv4 {
@@ -52,6 +94,36 @@
     .badge-ipv6 {
       background: var(--ipv6);
       color: white;
+    }
+    
+    .ip-version-unavailable {
+      color: var(--text-muted);
+      font-style: italic;
+      opacity: 0.7;
+    }
+    
+    .connection-status {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.5rem 1rem;
+      border-radius: 20px;
+      font-size: 0.8rem;
+      font-weight: 600;
+      margin-left: 1rem;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+    }
+    
+    .status-active {
+      background: rgba(16, 185, 129, 0.1);
+      border-color: var(--ipv4);
+      color: var(--ipv4);
+    }
+    
+    .status-inactive {
+      background: rgba(148, 163, 184, 0.1);
+      color: var(--text-muted);
     }
     
     .ip-grid {
@@ -73,10 +145,10 @@
     }
     
     .section-location {
-      border-left-color: var(--success);
+      border-left-color: var(--ipv4);
     }
     
-    .section-browser {
+    .section-client {
       border-left-color: #8b5cf6;
     }
     
@@ -124,6 +196,35 @@
       font-weight: 600;
       font-size: 0.85rem;
       margin-top: 0.25rem;
+    }
+    
+    .flag {
+      display: inline-block;
+      width: 20px;
+      height: 14px;
+      margin-right: 8px;
+      vertical-align: middle;
+      border: 1px solid var(--border);
+      border-radius: 2px;
+    }
+    
+    .flag-vn {
+      background: linear-gradient(to right, red 33%, yellow 33%, yellow 66%, red 66%);
+    }
+    
+    .flag-us {
+      background: linear-gradient(red 40%, white 40%, white 60%, red 60%);
+      position: relative;
+    }
+    
+    .flag-us::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 40%;
+      height: 54%;
+      background: #3b82f6;
     }
     
     .loading-box {
@@ -185,6 +286,16 @@
       transform: translateY(-2px);
     }
     
+    .btn-warning {
+      background: var(--warning);
+      color: white;
+    }
+    
+    .btn-warning:hover {
+      background: #d97706;
+      transform: translateY(-2px);
+    }
+    
     .alert {
       position: fixed;
       top: 20px;
@@ -198,6 +309,8 @@
       z-index: 1000;
       animation: slideIn 0.3s ease;
       border: 1px solid rgba(255, 255, 255, 0.1);
+      max-width: 400px;
+      word-break: break-word;
     }
     
     .alert.error {
@@ -205,7 +318,7 @@
     }
     
     .alert.warning {
-      background: #f59e0b;
+      background: var(--warning);
     }
     
     @keyframes slideIn {
@@ -259,33 +372,48 @@
       margin-top: 1rem;
     }
     
-    .flag {
-      display: inline-block;
-      width: 20px;
-      height: 14px;
-      margin-right: 8px;
-      vertical-align: middle;
+    .ip-test-buttons {
+      display: flex;
+      gap: 0.5rem;
+      margin-top: 1rem;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+    
+    .test-btn {
+      padding: 0.5rem 1rem;
+      background: var(--bg-card);
+      color: var(--text-secondary);
       border: 1px solid var(--border);
-      border-radius: 2px;
+      border-radius: 0.5rem;
+      font-size: 0.8rem;
+      cursor: pointer;
+      transition: all 0.2s;
     }
     
-    .flag-vn {
-      background: linear-gradient(to right, red 33%, yellow 33%, yellow 66%, red 66%);
+    .test-btn:hover {
+      background: var(--bg-card-hover);
+      color: var(--text-primary);
+      border-color: var(--accent);
     }
     
-    .flag-us {
-      background: linear-gradient(red 40%, white 40%, white 60%, red 60%);
-      position: relative;
+    .tech-info {
+      background: var(--bg-card);
+      border-radius: 0.75rem;
+      padding: 1rem;
+      margin-top: 1rem;
+      font-size: 0.85rem;
+      color: var(--text-muted);
+      border: 1px solid var(--border);
     }
     
-    .flag-us::before {
-      content: '';
-      position: absolute;
-      top: 0;
-      left: 0;
-      width: 40%;
-      height: 54%;
-      background: blue;
+    .tech-info ul {
+      padding-left: 1.5rem;
+      margin-top: 0.5rem;
+    }
+    
+    .tech-info li {
+      margin-bottom: 0.25rem;
     }
     
     @media (max-width: 768px) {
@@ -311,6 +439,16 @@
         text-align: left;
         max-width: 100%;
       }
+      
+      .ip-version-value {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 0.5rem;
+      }
+      
+      .ip-address {
+        font-size: 1.2rem;
+      }
     }
   </style>
 </head>
@@ -322,7 +460,7 @@
         <span class="logo-icon">📡</span>
         <h1>Kiểm tra IP của bạn</h1>
       </div>
-      <p class="subtitle">Xem địa chỉ IP, vị trí và thông tin mạng</p>
+      <p class="subtitle">Xem địa chỉ IPv4, IPv6, vị trí và thông tin mạng</p>
     </header>
 
     <!-- Back to home -->
@@ -333,17 +471,56 @@
     <!-- IP Result Section -->
     <div class="ip-result-box">
       <div class="ip-display">
-        <div class="ip-label">Địa chỉ IP của bạn là:</div>
-        <div class="ip-value" id="ipAddress">
-          <span id="ipValue">Đang tải...</span>
-          <span class="ip-version-badge" id="ipVersionBadge">...</span>
+        <h3 style="margin-top: 0; margin-bottom: 1.5rem; color: var(--text-primary);">
+          🌐 Thông tin địa chỉ IP
+        </h3>
+        
+        <!-- IPv6 Display -->
+        <div class="ip-version-group" id="ipv6Group">
+          <div class="ip-version-label">
+            <span>🔷 IPv6</span>
+            <span class="connection-status" id="ipv6Status">Đang kiểm tra...</span>
+          </div>
+          <div class="ip-version-value">
+            <div class="ip-address" id="ipv6Value">Đang tải địa chỉ IPv6...</div>
+            <span class="ip-version-badge badge-ipv6">IPv6</span>
+          </div>
         </div>
-        <div id="loadingText" class="timestamp">Đang kết nối với máy chủ...</div>
+        
+        <!-- IPv4 Display -->
+        <div class="ip-version-group" id="ipv4Group">
+          <div class="ip-version-label">
+            <span>🟢 IPv4</span>
+            <span class="connection-status" id="ipv4Status">Đang kiểm tra...</span>
+          </div>
+          <div class="ip-version-value">
+            <div class="ip-address" id="ipv4Value">Đang tải địa chỉ IPv4...</div>
+            <span class="ip-version-badge badge-ipv4">IPv4</span>
+          </div>
+        </div>
+        
+        <div id="loadingText" class="timestamp">Đang phân tích thông tin mạng của bạn...</div>
+        
+        <!-- Test Buttons -->
+        <div class="ip-test-buttons">
+          <button class="test-btn" id="testIPv4Btn">
+            <span>🔍</span> Kiểm tra IPv4
+          </button>
+          <button class="test-btn" id="testIPv6Btn">
+            <span>🔍</span> Kiểm tra IPv6
+          </button>
+          <button class="test-btn" id="testAllBtn">
+            <span>🔄</span> Kiểm tra tất cả
+          </button>
+        </div>
       </div>
 
       <div id="loading" class="loading-box">
         <div class="spinner"></div>
-        <p>Đang lấy thông tin IP của bạn...</p>
+        <p>Đang thu thập thông tin từ máy chủ...</p>
+        <p style="color: var(--text-muted); font-size: 0.9rem; margin-top: 0.5rem;">
+          Kiểm tra IPv4, IPv6, vị trí và nhà cung cấp
+        </p>
       </div>
 
       <div id="ipContent" style="display: none;">
@@ -370,8 +547,8 @@
               <span class="detail-value" id="asn">Đang tải...</span>
             </div>
             <div class="detail-item">
-              <span class="detail-label">Phiên bản IP:</span>
-              <span class="detail-value" id="ipVersionText">Đang tải...</span>
+              <span class="detail-label">Kết nối chính:</span>
+              <span class="detail-value" id="connectionType">Đang tải...</span>
             </div>
           </div>
 
@@ -402,22 +579,22 @@
             </div>
           </div>
 
-          <!-- Browser & Connection -->
-          <div class="ip-section section-browser">
+          <!-- Client Information -->
+          <div class="ip-section section-client">
             <div class="section-title">
-              <span>🌐</span> Kết nối & Thiết bị
+              <span>💻</span> Thông tin thiết bị
             </div>
             <div class="detail-item">
-              <span class="detail-label">Loại kết nối:</span>
-              <span class="detail-value" id="connectionType">Đang tải...</span>
+              <span class="detail-label">Trình duyệt:</span>
+              <span class="detail-value" id="browser">Đang tải...</span>
+            </div>
+            <div class="detail-item">
+              <span class="detail-label">Thiết bị:</span>
+              <span class="detail-value" id="device">Đang tải...</span>
             </div>
             <div class="detail-item">
               <span class="detail-label">Cloudflare Edge:</span>
               <span class="detail-value" id="cfEdge">Đang tải...</span>
-            </div>
-            <div class="detail-item">
-              <span class="detail-label">Mã bưu điện:</span>
-              <span class="detail-value" id="postal">Đang tải...</span>
             </div>
             <div class="detail-item">
               <span class="detail-label">Thời gian kiểm tra:</span>
@@ -425,14 +602,28 @@
             </div>
           </div>
         </div>
+        
+        <!-- Technical Info -->
+        <div class="tech-info">
+          <strong>💡 Thông tin kỹ thuật:</strong>
+          <ul>
+            <li>Hệ thống hiển thị cả IPv4 và IPv6 nếu được hỗ trợ</li>
+            <li>IPv6 được ưu tiên khi cả hai đều có sẵn</li>
+            <li>Một số mạng chỉ hỗ trợ IPv4 hoặc IPv6</li>
+            <li>Thông tin nhà cung cấp được xác định từ ASN và IP ranges</li>
+          </ul>
+        </div>
 
         <!-- Actions -->
         <div class="actions">
           <button class="btn btn-primary" id="refreshBtn">
             <span>🔄</span> Làm mới
           </button>
-          <button class="btn btn-secondary" id="copyBtn">
-            <span>📋</span> Sao chép IP
+          <button class="btn btn-secondary" id="copyIPv4Btn">
+            <span>📋</span> Sao chép IPv4
+          </button>
+          <button class="btn btn-secondary" id="copyIPv6Btn">
+            <span>📋</span> Sao chép IPv6
           </button>
           <button class="btn btn-success" id="jsonBtn">
             <span>📄</span> Xem JSON
@@ -443,7 +634,7 @@
         <div class="json-viewer" id="jsonViewer"></div>
 
         <div class="timestamp">
-          Dữ liệu được cung cấp bởi Cloudflare Network • Hỗ trợ IPv4 & IPv6
+          Dữ liệu được cung cấp bởi Cloudflare Network • Hỗ trợ đầy đủ IPv4 & IPv6
         </div>
       </div>
     </div>
@@ -460,229 +651,7 @@
 
   <script>
     document.addEventListener('DOMContentLoaded', function() {
+      // DOM Elements
       const loading = document.getElementById('loading');
       const ipContent = document.getElementById('ipContent');
-      const loadingText = document.getElementById('loadingText');
-      const alert = document.getElementById('alert');
-      const jsonViewer = document.getElementById('jsonViewer');
-      
-      // DOM Elements
-      const elements = {
-        ipValue: document.getElementById('ipValue'),
-        ipVersionBadge: document.getElementById('ipVersionBadge'),
-        ipVersionText: document.getElementById('ipVersionText'),
-        isp: document.getElementById('isp'),
-        ispBadge: document.getElementById('ispBadge'),
-        organization: document.getElementById('organization'),
-        asn: document.getElementById('asn'),
-        country: document.getElementById('country'),
-        countryCode: document.getElementById('countryCode'),
-        countryFlag: document.getElementById('countryFlag'),
-        province: document.getElementById('province'),
-        city: document.getElementById('city'),
-        timezone: document.getElementById('timezone'),
-        postal: document.getElementById('postal'),
-        connectionType: document.getElementById('connectionType'),
-        cfEdge: document.getElementById('cfEdge'),
-        timestamp: document.getElementById('timestamp')
-      };
-      
-      // Buttons
-      const refreshBtn = document.getElementById('refreshBtn');
-      const copyBtn = document.getElementById('copyBtn');
-      const jsonBtn = document.getElementById('jsonBtn');
-      
-      let currentIP = '';
-      let currentData = {};
-      let jsonVisible = false;
-      
-      // Show alert
-      function showAlert(message, type = 'success') {
-        alert.textContent = message;
-        alert.className = `alert ${type}`;
-        alert.style.display = 'block';
-        
-        setTimeout(() => {
-          alert.style.display = 'none';
-        }, 3000);
-      }
-      
-      // Format timestamp
-      function formatTimestamp(isoString) {
-        const date = new Date(isoString);
-        return date.toLocaleString('vi-VN', {
-          timeZone: 'Asia/Ho_Chi_Minh',
-          year: 'numeric',
-          month: '2-digit',
-          day: '2-digit',
-          hour: '2-digit',
-          minute: '2-digit',
-          second: '2-digit'
-        });
-      }
-      
-      // Set country flag
-      function setCountryFlag(countryCode) {
-        const flag = elements.countryFlag;
-        flag.className = 'flag';
-        
-        if (countryCode === 'VN') {
-          flag.classList.add('flag-vn');
-        } else if (countryCode === 'US') {
-          flag.classList.add('flag-us');
-        } else {
-          flag.style.display = 'none';
-        }
-      }
-      
-      // Get IP info
-      async function fetchIPInfo() {
-        try {
-          loading.style.display = 'block';
-          ipContent.style.display = 'none';
-          loadingText.textContent = 'Đang kết nối với máy chủ...';
-          jsonViewer.style.display = 'none';
-          jsonVisible = false;
-          
-          const response = await fetch('/ip');
-          
-          if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
-          }
-          
-          const data = await response.json();
-          currentData = data;
-          currentIP = data.ip;
-          
-          // Update UI
-          updateUI(data);
-          
-          // Show content
-          loading.style.display = 'none';
-          ipContent.style.display = 'block';
-          loadingText.textContent = 'Thông tin IP của bạn';
-          
-          showAlert('Đã cập nhật thông tin IP thành công!');
-          
-        } catch (error) {
-          console.error('Error:', error);
-          loadingText.textContent = 'Lỗi khi kết nối đến máy chủ';
-          loading.innerHTML = `
-            <div style="color: var(--error); font-size: 3rem; margin-bottom: 1rem;">❌</div>
-            <p>Không thể lấy thông tin IP</p>
-            <p style="color: var(--text-muted); font-size: 0.9rem; margin-top: 0.5rem;">${error.message}</p>
-            <button class="btn btn-primary" onclick="fetchIPInfo()" style="margin-top: 1rem;">
-              Thử lại
-            </button>
-          `;
-          showAlert('Lỗi khi tải thông tin IP', 'error');
-        }
-      }
-      
-      // Update UI with data
-      function updateUI(data) {
-        // IP Address
-        elements.ipValue.textContent = data.ip;
-        
-        // IP Version
-        const version = data.version || (data.ip.includes(':') ? 'IPv6' : 'IPv4');
-        elements.ipVersionBadge.textContent = version;
-        elements.ipVersionBadge.className = `ip-version-badge badge-${version.toLowerCase()}`;
-        elements.ipVersionText.textContent = version === 'IPv6' ? 'IPv6 (Internet Protocol version 6)' : 'IPv4 (Internet Protocol version 4)';
-        
-        // ISP & Organization
-        elements.isp.textContent = data.isp || 'Không xác định';
-        elements.organization.textContent = data.org || 'Không xác định';
-        
-        // Show ISP badge for major providers
-        const ispLower = (data.isp || '').toLowerCase();
-        if (ispLower.includes('viettel') || ispLower.includes('vnpt') || ispLower.includes('fpt') || 
-            ispLower.includes('mobifone') || ispLower.includes('vinaphone')) {
-          elements.ispBadge.style.display = 'inline-block';
-          if (ispLower.includes('viettel')) elements.ispBadge.textContent = 'Viettel';
-          else if (ispLower.includes('vnpt')) elements.ispBadge.textContent = 'VNPT';
-          else if (ispLower.includes('fpt')) elements.ispBadge.textContent = 'FPT';
-          else if (ispLower.includes('mobifone')) elements.ispBadge.textContent = 'MobiFone';
-          else if (ispLower.includes('vinaphone')) elements.ispBadge.textContent = 'Vinaphone';
-        } else {
-          elements.ispBadge.style.display = 'none';
-        }
-        
-        // ASN
-        elements.asn.textContent = data.asn ? `AS${data.asn}` : 'Không xác định';
-        
-        // Location
-        elements.country.textContent = data.country || data.countryName || 'N/A';
-        elements.countryCode.textContent = data.countryCode || 'N/A';
-        setCountryFlag(data.countryCode);
-        
-        elements.province.textContent = data.province || data.region || 'N/A';
-        elements.city.textContent = data.city || 'N/A';
-        elements.timezone.textContent = data.timezone || 'N/A';
-        elements.postal.textContent = data.postal || data.postalCode || 'N/A';
-        
-        // Browser & Connection
-        elements.connectionType.textContent = data.connectionType || (data.ip.includes(':') ? 'IPv6 Connection' : 'IPv4 Connection');
-        elements.cfEdge.textContent = data.cloudflare?.colo || 'N/A';
-        
-        // Timestamp
-        elements.timestamp.textContent = data.timestamp ? formatTimestamp(data.timestamp) : formatTimestamp(new Date().toISOString());
-      }
-      
-      // Copy IP to clipboard
-      copyBtn.addEventListener('click', async () => {
-        try {
-          await navigator.clipboard.writeText(currentIP);
-          showAlert(`✅ Đã sao chép IP: ${currentIP}`);
-        } catch (err) {
-          showAlert('❌ Không thể sao chép IP', 'error');
-        }
-      });
-      
-      // Toggle JSON viewer
-      jsonBtn.addEventListener('click', () => {
-        jsonVisible = !jsonVisible;
-        
-        if (jsonVisible) {
-          const jsonStr = JSON.stringify(currentData, null, 2);
-          // Syntax highlighting for JSON
-          const highlighted = jsonStr
-            .replace(/("(\\u[a-zA-Z0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?|\b(true|false|null)\b|-?\d+(?:\.\d*)?(?:[eE][+\-]?\d+)?)/g, 
-              function(match) {
-                let cls = 'color: var(--text-secondary);';
-                if (/^"/.test(match)) {
-                  if (/:$/.test(match)) {
-                    cls = 'color: var(--accent);';
-                  } else {
-                    cls = 'color: var(--success);';
-                  }
-                } else if (/true|false/.test(match)) {
-                  cls = 'color: #f59e0b;';
-                } else if (/null/.test(match)) {
-                  cls = 'color: #ef4444;';
-                }
-                return `<span style="${cls}">${match}</span>`;
-              });
-          
-          jsonViewer.innerHTML = highlighted;
-          jsonViewer.style.display = 'block';
-          jsonBtn.innerHTML = '<span>📄</span> Ẩn JSON';
-          jsonBtn.classList.remove('btn-success');
-          jsonBtn.classList.add('btn-secondary');
-        } else {
-          jsonViewer.style.display = 'none';
-          jsonBtn.innerHTML = '<span>📄</span> Xem JSON';
-          jsonBtn.classList.remove('btn-secondary');
-          jsonBtn.classList.add('btn-success');
-        }
-      });
-      
-      // Refresh button
-      refreshBtn.addEventListener('click', fetchIPInfo);
-      
-      // Initial load
-      fetchIPInfo();
-    });
-  </script>
-</body>
-</html>
+      const loadingText =
